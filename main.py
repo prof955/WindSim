@@ -113,8 +113,8 @@ def main():
     light_cone_texture = create_true_light_cone()
     
     # Pre-render glow (downward semi-circle)
-    # Pre-render glow (downward semi-circle) - OPTIMIZED SIZE & SOFTNESS
-    glow_radius = 20 * SCALE_FACTOR
+    # Pre-render glow (downward semi-circle) - CONFIG DRIVEN
+    glow_radius = GLOW_RADIUS_FACTOR * SCALE_FACTOR
     glow_surf = pygame.Surface((glow_radius * 2, glow_radius), pygame.SRCALPHA)
     for y in range(glow_radius):
         for x in range(glow_radius * 2):
@@ -123,8 +123,8 @@ def main():
             dist = math.sqrt(dx*dx + dy*dy)
             if dist < glow_radius:
                 ratio = dist / glow_radius
-                # Power 3.0: Kenarlar Power 2.0'dan çok daha yumuşak solacak
-                alpha_factor = math.pow(max(0.0, 1.0 - ratio), 3.0)
+                # GLOW_SOFTNESS (power) ile kenarları yumuşat
+                alpha_factor = math.pow(max(0.0, 1.0 - ratio), GLOW_SOFTNESS)
                 alpha = int(alpha_factor * 255 * LAMP_INTENSITY * 0.4)
                 alpha = max(0, min(255, alpha))
                 if alpha > 0:
@@ -194,7 +194,7 @@ def main():
                 
                 # Işıkları yeni boyutlara göre baştan render et
                 light_cone_texture = create_true_light_cone()
-                glow_radius = 20 * SCALE_FACTOR
+                glow_radius = GLOW_RADIUS_FACTOR * SCALE_FACTOR
                 glow_surf = pygame.Surface((glow_radius * 2, glow_radius), pygame.SRCALPHA)
                 for y in range(glow_radius):
                     for x in range(glow_radius * 2):
@@ -203,7 +203,7 @@ def main():
                         dist = math.sqrt(dx*dx + dy*dy)
                         if dist < glow_radius:
                             ratio = dist / glow_radius
-                            alpha_f = math.pow(max(0.0, 1.0 - ratio), 3.0)
+                            alpha_f = math.pow(max(0.0, 1.0 - ratio), GLOW_SOFTNESS)
                             alpha = int(alpha_f * 255 * LAMP_INTENSITY * 0.4)
                             alpha = max(0, min(255, alpha))
                             if alpha > 0:

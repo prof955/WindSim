@@ -21,17 +21,15 @@ class ParticleSystem:
             (255, 255, 255)  # Beyaz
         ]
         self.grass_blades = []
-        for x in range(0, SCREEN_WIDTH, 4):
-            if random.random() < 0.8:
-                is_flower = random.random() < 0.08
-                is_mutant = random.random() < 0.03
-                # Doğal tepe/dalgalanma hissi veren matematiksel zemin genetiği
-                rolling_h = 10.0 + math.sin(x * 0.05) * 6.0 + math.sin(x * 0.01) * 4.0
+        for x in range(0, SCREEN_WIDTH, GRASS_SPACING):
+            if random.random() < GRASS_PROBABILITY:
+                is_flower = random.random() < FLOWER_PROBABILITY
+                is_mutant = random.random() < MUTANT_PROBABILITY
+                # Doğal tepe/dalgalanma hissi veren matematiksel zemin genetiği - CONFIG DRIVEN
+                rolling_h = GRASS_BASE_HEIGHT + math.sin(x * 0.05) * GRASS_ROLLING_AMP_1 + math.sin(x * 0.01) * GRASS_ROLLING_AMP_2
                 spike = random.uniform(5.0, 15.0) if random.random() < 0.1 else 0.0
                 
-                target_height = random.uniform(35.0, 50.0) if is_mutant else (rolling_h + spike + random.uniform(0.0, 5.0))
-                if not is_mutant and target_height < 5.0: 
-                    target_height = random.uniform(5.0, 10.0)
+                target_height = random.uniform(MUTANT_HEIGHT_MIN, MUTANT_HEIGHT_MAX) if is_mutant else (rolling_h + spike + random.uniform(0.0, GRASS_VARIATION))
                 
                 self.grass_blades.append({
                     'x': x,
@@ -72,34 +70,38 @@ class ParticleSystem:
         self.snow_ground = new_snow
 
         # 2. Mevcut çimleri GÜNCELLE ve KORU (Resetleme!)
-        updated_grass = []
+        updated_grass_dict = {} # X: grass_data (Çakışmaları önlemek için)
+        
         for grass in self.grass_blades:
-            new_x = int(grass['x'] * ratio_x)
-            # Sadece yeni ekranın içinde kalanları tut
-            if 0 <= new_x < new_w:
-                grass['x'] = new_x
-                # grass['c_h'] DEĞİŞTİRME - büyüme durumunu koru
-                updated_grass.append(grass)
+            # Hizalamayı korumak için en yakın GRASS_SPACING katına mıknatısla
+            raw_new_x = grass['x'] * ratio_x
+            snapped_x = int(round(raw_new_x / GRASS_SPACING) * GRASS_SPACING)
+            
+            # Sadece ekran içinde kalanları ve çakışmayanları tut
+            if 0 <= snapped_x < new_w and snapped_x not in updated_grass_dict:
+                grass['x'] = snapped_x
+                updated_grass_dict[snapped_x] = grass
         
-        self.grass_blades = updated_grass
+        self.grass_blades = list(updated_grass_dict.values())
         
-        # 3. Yeni alanlarda eksik çim varsa doldur
-        existing_xs = {g['x'] for g in self.grass_blades}
+        # 4. Çim boşluklarını doldur (Yeni genişliğe göre eksik kalan yerlere ekle)
         flower_colors = [(255, 105, 180), (255, 215, 0), (147, 112, 219), (255, 69, 0), (135, 206, 235), (255, 255, 255)]
-        for x in range(0, new_w, 4):
-            if x not in existing_xs:
-                if random.random() < 0.8:
-                    is_flower = random.random() < 0.08
-                    is_mutant = random.random() < 0.03
-                    rolling_h = 10.0 + math.sin(x * 0.05) * 6.0 + math.sin(x * 0.01) * 4.0
+        for x in range(0, new_w, GRASS_SPACING):
+            if x not in updated_grass_dict:
+                if random.random() < GRASS_PROBABILITY:
+                    is_flower = random.random() < FLOWER_PROBABILITY
+                    is_mutant = random.random() < MUTANT_PROBABILITY
+                    rolling_h = GRASS_BASE_HEIGHT + math.sin(x * 0.05) * GRASS_ROLLING_AMP_1 + math.sin(x * 0.01) * GRASS_ROLLING_AMP_2
                     spike = random.uniform(5.0, 15.0) if random.random() < 0.1 else 0.0
-                    target_height = random.uniform(35.0, 50.0) if is_mutant else (rolling_h + spike + random.uniform(0.0, 5.0))
-                    self.grass_blades.append({
+                    target_height = random.uniform(MUTANT_HEIGHT_MIN, MUTANT_HEIGHT_MAX) if is_mutant else (rolling_h + spike + random.uniform(0.0, GRASS_VARIATION))
+                    new_blade = {
                         'x': x, 't_h': target_height, 'c_h': target_height if self.mode == "SNOW" else 1.0,
                         'bend': 0.0, 'flower': is_flower or is_mutant,
                         'flower_color': random.choice(flower_colors), 'phase': random.uniform(0, math.pi * 2),
                         'is_mutant': is_mutant
-                    })
+                    }
+                    self.grass_blades.append(new_blade)
+        
         self.grass_blades.sort(key=lambda g: g['x'])
 
         # 4. Kutuları orantıla ve ölçekle
@@ -178,7 +180,7 @@ class ParticleSystem:
                 for grass in self.grass_blades:
                     snow_h = self.snow_ground[grass['x']]
                     if self.mode == "RAIN" and grass['c_h'] < grass['t_h'] and snow_h < grass['c_h']:
-                        grass['c_h'] += 0.2
+                        grass['c_h'] += GRASS_GROWTH_SPEED
                     if snow_h > grass['c_h'] + 2:
                         grass['c_h'] = max(0.5, grass['c_h'] - 0.1)
 
@@ -205,8 +207,8 @@ class ParticleSystem:
                         box.snow_box[i] -= 1
 
         if self.mode == "RAIN":
-            # Yoğunluğu korumak için drop sayısını genişliğe oranla (Baz: 1280 genişlik için 800 drop)
-            max_drops = int(800 * (SCREEN_WIDTH / 1280.0))
+            # Yoğunluğu korumak için drop sayısını genişliğe oranla (Baz: 1280 genişlik için RAIN_DENSITY)
+            max_drops = int(RAIN_DENSITY * (SCREEN_WIDTH / 1280.0))
             while len(self.rain_drops) < max_drops:
                 self.add_rain()
             for drop in self.rain_drops[:]:
@@ -249,8 +251,8 @@ class ParticleSystem:
 
         elif self.mode == "SNOW":
             snow_speed_mult = speed_mult * 2.0  
-            # Yoğunluğu korumak için flake sayısını genişliğe oranla (Baz: 1280 genişlik için 1500 flake)
-            max_flakes = int(1500 * (SCREEN_WIDTH / 1280.0))
+            # Yoğunluğu korumak için flake sayısını genişliğe oranla (Baz: 1280 genişlik için SNOW_DENSITY)
+            max_flakes = int(SNOW_DENSITY * (SCREEN_WIDTH / 1280.0))
             while len(self.snow_flakes) < max_flakes: 
                 self.add_snow()
 
@@ -481,14 +483,14 @@ class ParticleSystem:
             if snow_h >= grass['c_h'] * 1.5:
                 continue 
             
-            wind_effect = self.smooth_wind * 1.5
-            oscillation = math.sin(self.time_accumulator * 0.003 + grass['phase']) * 2.0
+            wind_effect = self.smooth_wind * GRASS_WIND_SPEED_MULT
+            oscillation = math.sin(self.time_accumulator * 0.003 + grass['phase']) * GRASS_OSCILLATION_AMP
             
             snow_weight_bend = 0
             if snow_h > 0:
                 snow_weight_bend = min(snow_h, grass['c_h']) * 0.5 * (1 if self.wind_speed >= 0 else -1)
                 
-            target_bend = wind_effect + oscillation + snow_weight_bend
+            target_bend = (wind_effect + oscillation + snow_weight_bend) * GRASS_BEND_FACTOR
             grass['bend'] += (target_bend - grass['bend']) * 0.1
             
             base_x = x
