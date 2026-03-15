@@ -12,22 +12,53 @@ class ParticleSystem:
         self.snow_flakes = []
         self.splashes = []
         self.snow_ground = [0] * SCREEN_WIDTH
-        self.snow_box = [0] * BOX_WIDTH 
-        self.mode = "RAIN"
-        self.wind_speed = 2.0
+        flower_colors = [
+            (255, 105, 180), # Sıcak Pembe
+            (255, 215, 0),   # Sarı/Altın
+            (147, 112, 219), # Mor
+            (255, 69, 0),    # Turuncu/Kırmızı
+            (135, 206, 235), # Gök Mavisi
+            (255, 255, 255)  # Beyaz
+        ]
+        self.grass_blades = []
+        for x in range(0, SCREEN_WIDTH, 4):
+            if random.random() < 0.8:
+                is_flower = random.random() < 0.08
+                self.grass_blades.append({
+                    'x': x,
+                    't_h': random.uniform(12.0, 32.0),
+                    'c_h': random.uniform(2.0, 8.0),
+                    'bend': 0.0,
+                    'flower': is_flower,
+                    'flower_color': random.choice(flower_colors) if is_flower else None,
+                    'phase': random.uniform(0, math.pi * 2)
+                })
+        self.mode = "SNOW"
+        self.wind_speed = 0.0
         self.frame_counter = 0
         self.is_rapid_melting = False
         self.current_melt_mult = 1.0
 
-    def get_surface_y(self, x, current_y, box):
+    def get_surface_y(self, x, current_y, boxes, exclude_box=None):
         ix = int(x)
         if ix < 0 or ix >= SCREEN_WIDTH:
-            return SCREEN_HEIGHT
-        if box.rect.left <= ix < box.rect.right and current_y <= box.rect.top:
-            lx = ix - box.rect.left
-            if 0 <= lx < len(self.snow_box):
-                return box.rect.top - self.snow_box[lx]
-        return SCREEN_HEIGHT - self.snow_ground[ix]
+            return SCREEN_HEIGHT, None
+            
+        highest_y = SCREEN_HEIGHT - self.snow_ground[ix]
+        hit_box = None
+        
+        for box in boxes:
+            if box is exclude_box: continue
+            if box.rect.left <= ix < box.rect.right:
+                lx = ix - box.rect.left
+                if current_y <= box.get_bottom_y(lx):
+                    if 0 <= lx < len(box.snow_box):
+                        surf_y = box.get_base_y(lx) - box.snow_box[lx]
+                        if surf_y < highest_y:
+                            highest_y = surf_y
+                            hit_box = box
+                        
+        return highest_y, hit_box
 
     def add_rain(self):
         buffer = SCREEN_WIDTH // 2
@@ -57,11 +88,19 @@ class ParticleSystem:
             vy = (-abs(incoming_vy) * random.uniform(0.1, 0.3))
             self.splashes.append({'x': x, 'y': y, 'vx': vx, 'vy': vy, 'life': random.randint(10, 20)})
 
-    def update_physics(self, box, speed_mult):
+    def update_physics(self, boxes, speed_mult):
         self.frame_counter += 1
         current_time = pygame.time.get_ticks()
         max_snow_current = max(self.snow_ground) if self.snow_ground else 0
         current_snow_ratio = max_snow_current / MAX_SNOW_GROUND if MAX_SNOW_GROUND > 0 else 0
+
+        if self.frame_counter % 5 == 0:
+            for grass in self.grass_blades:
+                snow_h = self.snow_ground[grass['x']]
+                if self.mode == "RAIN" and grass['c_h'] < grass['t_h'] and snow_h < grass['c_h']:
+                    grass['c_h'] += 0.2
+                if snow_h > grass['c_h'] + 2:
+                    grass['c_h'] = max(1.0, grass['c_h'] - 0.1)
 
         if current_snow_ratio >= DYNAMIC_MELT_HIGH and not self.is_rapid_melting:
             self.is_rapid_melting = True
@@ -80,9 +119,10 @@ class ParticleSystem:
             for i in range(SCREEN_WIDTH):
                 if self.snow_ground[i] > 0 and random.uniform(0, 100) < melt_chance:
                     self.snow_ground[i] -= 1
-            for i in range(len(self.snow_box)):
-                if self.snow_box[i] > 0 and random.uniform(0, 100) < melt_chance:
-                    self.snow_box[i] -= 1
+            for box in boxes:
+                for i in range(len(box.snow_box)):
+                    if box.snow_box[i] > 0 and random.uniform(0, 100) < melt_chance:
+                        box.snow_box[i] -= 1
 
         if self.mode == "RAIN":
             while len(self.rain_drops) < 800:
@@ -93,23 +133,30 @@ class ParticleSystem:
                 next_x = drop['x'] + vx
                 next_y = drop['y'] + vy
                 
-                if box.rect.collidepoint(next_x, next_y):
-                    self.add_splash(next_x, box.rect.top, self.wind_speed * 3.0, drop['vy'])
-                    if drop['y'] <= box.rect.top:
-                        lx = int(next_x) - box.rect.left
-                        if 0 <= lx < len(self.snow_box) and self.snow_box[lx] > 0 and random.random() < RAIN_IMPACT_MELT_CHANCE:
-                            self.snow_box[lx] = max(0, self.snow_box[lx] - 2)
+                hit_box = None
+                for box in boxes:
+                    if box.collidepoint((next_x, next_y)):
+                        hit_box = box
+                        break
+
+                if hit_box:
+                    lx = int(next_x) - hit_box.rect.left
+                    base_y = hit_box.get_base_y(lx)
+                    self.add_splash(next_x, base_y, self.wind_speed * 3.0, drop['vy'])
+                    if drop['y'] <= base_y:
+                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] > 0 and random.random() < RAIN_IMPACT_MELT_CHANCE:
+                            hit_box.snow_box[lx] = max(0, hit_box.snow_box[lx] - 2)
                     self.rain_drops.remove(drop)
                     continue
 
-                hit_y = self.get_surface_y(next_x, drop['y'], box)
+                hit_y, hit_box = self.get_surface_y(next_x, drop['y'], boxes)
                 if next_y >= hit_y:
                     self.add_splash(next_x, hit_y, self.wind_speed * 3.0, drop['vy'])
                     ix = int(next_x)
-                    if box.rect.left <= ix < box.rect.right and drop['y'] <= box.rect.top:
-                        lx = ix - box.rect.left
-                        if 0 <= lx < len(self.snow_box) and self.snow_box[lx] > 0 and random.random() < RAIN_IMPACT_MELT_CHANCE:
-                            self.snow_box[lx] = max(0, self.snow_box[lx] - 2)
+                    if hit_box:
+                        lx = ix - hit_box.rect.left
+                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] > 0 and random.random() < RAIN_IMPACT_MELT_CHANCE:
+                            hit_box.snow_box[lx] = max(0, hit_box.snow_box[lx] - 2)
                     else:
                         if 0 <= ix < SCREEN_WIDTH and self.snow_ground[ix] > 0 and random.random() < RAIN_IMPACT_MELT_CHANCE:
                             self.snow_ground[ix] = max(0, self.snow_ground[ix] - 2)
@@ -133,28 +180,35 @@ class ParticleSystem:
                 if next_x < 0: next_x += SCREEN_WIDTH
                 if next_x >= SCREEN_WIDTH: next_x -= SCREEN_WIDTH
 
-                if box.rect.collidepoint(next_x, next_y):
-                    if flake['y'] <= box.rect.top + vy:
-                        lx = int(next_x) - box.rect.left
-                        if 0 <= lx < len(self.snow_box) and self.snow_box[lx] < MAX_SNOW_BOX:
-                            self.snow_box[lx] += 1
+                hit_box = None
+                for box in boxes:
+                    if box.collidepoint((next_x, next_y)):
+                        hit_box = box
+                        break
+
+                if hit_box:
+                    lx = int(next_x) - hit_box.rect.left
+                    base_y = hit_box.get_base_y(lx)
+                    if flake['y'] <= base_y + vy:
+                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] < MAX_SNOW_BOX:
+                            hit_box.snow_box[lx] += 1
                     else: 
-                        if box.is_grounded:
+                        if hit_box.is_grounded:
                             if random.random() < 0.5: 
                                 scatter = int(abs(random.gauss(0, 3 + abs(self.wind_speed))))
-                                side_x = box.rect.left - 1 - scatter if vx > 0 else box.rect.right + scatter
+                                side_x = hit_box.rect.left - 1 - scatter if vx > 0 else hit_box.rect.right + scatter
                                 if 0 <= side_x < SCREEN_WIDTH and self.snow_ground[side_x] < MAX_SNOW_GROUND:
                                     self.snow_ground[side_x] += 1
                     self.snow_flakes.remove(flake)
                     continue
 
-                hit_y = self.get_surface_y(next_x, flake['y'], box)
+                hit_y, hit_box = self.get_surface_y(next_x, flake['y'], boxes)
                 if next_y >= hit_y:
                     ix = int(next_x)
-                    if box.rect.left <= ix < box.rect.right and flake['y'] <= box.rect.top:
-                        lx = ix - box.rect.left
-                        if 0 <= lx < len(self.snow_box) and self.snow_box[lx] < MAX_SNOW_BOX:
-                            self.snow_box[lx] += 1
+                    if hit_box:
+                        lx = ix - hit_box.rect.left
+                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] < MAX_SNOW_BOX:
+                            hit_box.snow_box[lx] += 1
                     else:
                         if 0 <= ix < SCREEN_WIDTH and self.snow_ground[ix] < MAX_SNOW_GROUND:
                             self.snow_ground[ix] += 1
@@ -163,28 +217,43 @@ class ParticleSystem:
                     flake['x'] = next_x
                     flake['y'] = next_y
 
-            self.simulate_snow_avalanche(self.snow_ground, SCREEN_WIDTH, box, is_ground=True)
-            self.simulate_snow_avalanche(self.snow_box, box.rect.width, is_ground=False)
+            self.simulate_snow_avalanche(self.snow_ground, SCREEN_WIDTH, boxes, is_ground=True)
+            for box in boxes:
+                self.simulate_snow_avalanche(box.snow_box, box.rect.width, boxes, is_ground=False)
 
-            if box.rect.left > 0 and self.snow_box[0] > 0:
-                box_edge_world_y = box.rect.top - self.snow_box[0]
-                spill_target = box.rect.left - 1
-                if 0 <= spill_target < SCREEN_WIDTH:
-                    ground_world_y = SCREEN_HEIGHT - self.snow_ground[spill_target]
-                    if ground_world_y > box_edge_world_y + 2: 
-                        self.snow_box[0] -= 1
-                        scatter_x = max(0, box.rect.left - random.randint(1, 4))
-                        self.snow_ground[scatter_x] += 1
+                if box.rect.left > 0 and box.snow_box[0] > 0:
+                    box_edge_world_y = box.get_base_y(0) - box.snow_box[0]
+                    spill_target = box.rect.left - 1
+                    if 0 <= spill_target < SCREEN_WIDTH:
+                        hit_y, hit_b = self.get_surface_y(spill_target, SCREEN_HEIGHT, boxes, exclude_box=box)
+                        if hit_y > box_edge_world_y + 2: 
+                            box.snow_box[0] -= 1
+                            scatter_x = max(0, box.rect.left - random.randint(1, 4))
+                            _, s_box = self.get_surface_y(scatter_x, box_edge_world_y, boxes, exclude_box=box)
+                            if s_box:
+                                lx = scatter_x - s_box.rect.left
+                                if 0 <= lx < len(s_box.snow_box) and s_box.snow_box[lx] < MAX_SNOW_BOX:
+                                    s_box.snow_box[lx] += 1
+                            else:
+                                if self.snow_ground[scatter_x] < MAX_SNOW_GROUND:
+                                    self.snow_ground[scatter_x] += 1
 
-            if box.rect.right < SCREEN_WIDTH and self.snow_box[-1] > 0:
-                box_edge_world_y = box.rect.top - self.snow_box[-1]
-                spill_target = box.rect.right
-                if 0 <= spill_target < SCREEN_WIDTH:
-                    ground_world_y = SCREEN_HEIGHT - self.snow_ground[spill_target]
-                    if ground_world_y > box_edge_world_y + 2:
-                        self.snow_box[-1] -= 1
-                        scatter_x = min(SCREEN_WIDTH - 1, box.rect.right + random.randint(0, 3))
-                        self.snow_ground[scatter_x] += 1
+                if box.rect.right < SCREEN_WIDTH and box.snow_box[-1] > 0:
+                    box_edge_world_y = box.get_base_y(box.rect.width - 1) - box.snow_box[-1]
+                    spill_target = box.rect.right
+                    if 0 <= spill_target < SCREEN_WIDTH:
+                        hit_y, hit_b = self.get_surface_y(spill_target, SCREEN_HEIGHT, boxes, exclude_box=box)
+                        if hit_y > box_edge_world_y + 2:
+                            box.snow_box[-1] -= 1
+                            scatter_x = min(SCREEN_WIDTH - 1, box.rect.right + random.randint(0, 3))
+                            _, s_box = self.get_surface_y(scatter_x, box_edge_world_y, boxes, exclude_box=box)
+                            if s_box:
+                                lx = scatter_x - s_box.rect.left
+                                if 0 <= lx < len(s_box.snow_box) and s_box.snow_box[lx] < MAX_SNOW_BOX:
+                                    s_box.snow_box[lx] += 1
+                            else:
+                                if self.snow_ground[scatter_x] < MAX_SNOW_GROUND:
+                                    self.snow_ground[scatter_x] += 1
 
         for splash in self.splashes[:]:
             splash['vy'] += GRAVITY 
@@ -192,15 +261,22 @@ class ParticleSystem:
             splash['y'] += splash['vy'] 
             splash['life'] -= 1 
 
-            if box.rect.collidepoint(splash['x'], splash['y']):
-                splash['vy'] = -abs(splash['vy']) * 0.5 
-                splash['y'] = box.rect.top - 1
+            hit_box = None
+            for box in boxes:
+                if box.collidepoint((splash['x'], splash['y'])):
+                    hit_box = box
+                    break
 
-            hit_y = SCREEN_HEIGHT - self.snow_ground[int(splash['x'])] if 0 <= int(splash['x']) < SCREEN_WIDTH else SCREEN_HEIGHT
+            if hit_box:
+                splash['vy'] = -abs(splash['vy']) * 0.5 
+                lx = int(splash['x']) - hit_box.rect.left
+                splash['y'] = hit_box.get_base_y(lx) - 1
+
+            hit_y, _ = self.get_surface_y(splash['x'], splash['y'], boxes)
             if splash['y'] >= hit_y or splash['life'] <= 0:
                 self.splashes.remove(splash)
 
-    def simulate_snow_avalanche(self, arr, length, box=None, is_ground=False):
+    def simulate_snow_avalanche(self, arr, length, boxes=None, is_ground=False):
         for i in range(length):
             if arr[i] > 0:
                 dirs = [-1, 1]
@@ -208,22 +284,34 @@ class ParticleSystem:
                 for d in dirs:
                     ni = i + d
                     if 0 <= ni < length:
-                        if is_ground and box and box.is_grounded:
-                            if not (box.rect.left <= i < box.rect.right) and (box.rect.left <= ni < box.rect.right):
-                                snow_y = SCREEN_HEIGHT - arr[i]
-                                if snow_y < box.rect.bottom:
-                                    continue
+                        blocked = False
+                        if is_ground and boxes:
+                            for bx in boxes:
+                                if bx.is_grounded:
+                                    if not (bx.rect.left <= i < bx.rect.right) and (bx.rect.left <= ni < bx.rect.right):
+                                        snow_y = SCREEN_HEIGHT - arr[i]
+                                        lx_ni = ni - bx.rect.left
+                                        if snow_y < bx.get_bottom_y(lx_ni):
+                                            blocked = True
+                                            break
+                        if blocked:
+                            continue
+                            
                         repose = random.randint(1, 3) 
-                        if is_ground and box and box.is_grounded:
-                            if i == box.rect.left - 1 or i == box.rect.right:
-                                repose = random.randint(4, 8) 
+                        if is_ground and boxes:
+                            for bx in boxes:
+                                if bx.is_grounded:
+                                    if i == bx.rect.left - 1 or i == bx.rect.right:
+                                        repose = random.randint(4, 8) 
+                                        break
+                                        
                         if arr[i] - arr[ni] > repose:  
                             if random.random() < 0.8:
                                 arr[i] -= 1
                                 arr[ni] += 1
                                 break
 
-    def draw_snow_accumulation(self, surface, box, scale_mode):
+    def draw_snow_accumulation(self, surface, boxes, scale_mode):
         sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1
         for x in range(0, SCREEN_WIDTH, sf):
             chunk = self.snow_ground[x:x+sf]
@@ -233,15 +321,31 @@ class ParticleSystem:
                     pygame.draw.rect(surface, WHITE, (x, SCREEN_HEIGHT - h, sf, h))
                 else:
                     pygame.draw.line(surface, WHITE, (x, SCREEN_HEIGHT - h), (x, SCREEN_HEIGHT))
-        for x in range(0, box.rect.width, sf):
-            chunk = self.snow_box[x:x+sf]
-            h = max(chunk) if chunk else 0
-            if h > 0:
-                world_x = box.rect.left + x
-                if scale_mode == "Retro_Scale":
-                    pygame.draw.rect(surface, WHITE, (world_x, box.rect.top - h, sf, h))
-                else:
-                    pygame.draw.line(surface, WHITE, (world_x, box.rect.top - h), (world_x, box.rect.top))
+                    
+        for box in boxes:
+            for x in range(0, box.rect.width, sf):
+                chunk = box.snow_box[x:x+sf]
+                h = max(chunk) if chunk else 0
+                if h > 0:
+                    world_x = box.rect.left + x
+                    base_y = box.get_base_y(x)
+                    
+                    # Snow height shouldn't go through the bottom of another box
+                    max_snow_top = base_y - h
+                    for other in boxes:
+                        if other is not box:
+                            if other.rect.left <= world_x < other.rect.right:
+                                lx_other = world_x - other.rect.left
+                                bottom_other = other.get_bottom_y(lx_other)
+                                if bottom_other < base_y and bottom_other > max_snow_top:
+                                    max_snow_top = bottom_other
+                                    
+                    draw_height = base_y - max_snow_top
+                    if draw_height > 0:
+                        if scale_mode == "Retro_Scale":
+                            pygame.draw.rect(surface, WHITE, (world_x, max_snow_top, sf, draw_height))
+                        else:
+                            pygame.draw.line(surface, WHITE, (world_x, max_snow_top), (world_x, int(base_y)))
 
     def draw_particles(self, target_surface, scale_mode):
         sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1
@@ -264,6 +368,52 @@ class ParticleSystem:
                 else:
                     target_surface.set_at((int(x), int(y)), ICE_BLUE)
 
+    def draw_grass(self, surface, scale_mode):
+        sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1
+        current_time = pygame.time.get_ticks()
+        for grass in self.grass_blades:
+            x = grass['x']
+            snow_h = self.snow_ground[x]
+            if snow_h >= grass['c_h'] * 1.5:
+                continue 
+            
+            wind_effect = self.wind_speed * 1.5
+            oscillation = math.sin(current_time * 0.003 + grass['phase']) * 2.0
+            
+            snow_weight_bend = 0
+            if snow_h > 0:
+                snow_weight_bend = min(snow_h, grass['c_h']) * 0.5 * (1 if self.wind_speed >= 0 else -1)
+                
+            target_bend = wind_effect + oscillation + snow_weight_bend
+            grass['bend'] += (target_bend - grass['bend']) * 0.1
+            
+            base_x = x
+            base_y = SCREEN_HEIGHT
+            
+            h = grass['c_h']
+            tip_dx = grass['bend']
+            if abs(tip_dx) > h * 0.9:
+                tip_dx = (h * 0.9) * (1 if tip_dx > 0 else -1)
+                
+            tip_dy = math.sqrt(h**2 - tip_dx**2)
+            tip_x = base_x + tip_dx
+            tip_y = base_y - tip_dy
+            
+            color = (34, 139, 34) 
+            if h < 5:
+                color = (107, 142, 35) 
+                
+            if scale_mode == "Retro_Scale":
+                rx1, ry1 = (int(base_x)//sf)*sf, (int(base_y)//sf)*sf
+                rx2, ry2 = (int(tip_x)//sf)*sf, (int(tip_y)//sf)*sf
+                pygame.draw.line(surface, color, (rx1, ry1), (rx2, ry2), sf)
+                if grass['flower'] and h > 8:
+                    pygame.draw.rect(surface, grass['flower_color'], (rx2 - sf, ry2 - sf, sf*2, sf*2))
+            else:
+                pygame.draw.line(surface, color, (int(base_x), int(base_y)), (int(tip_x), int(tip_y)), 1)
+                if grass['flower'] and h > 8:
+                    pygame.draw.circle(surface, grass['flower_color'], (int(tip_x), int(tip_y)), 2)
+
     def draw_splashes(self, target_surface, scale_mode):
         sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1
         for splash in self.splashes:
@@ -276,24 +426,30 @@ class ParticleSystem:
 
 
 class PhysicsBox:
-    def __init__(self):
-        self.rect = pygame.Rect(SCREEN_WIDTH // 2 - BOX_WIDTH // 2, SCREEN_HEIGHT - BOX_HEIGHT - 100, BOX_WIDTH, BOX_HEIGHT)
+    def __init__(self, start_x=None, start_y=None):
+        if start_x is None:
+            start_x = SCREEN_WIDTH // 2 - BOX_WIDTH // 2
+        if start_y is None:
+            start_y = SCREEN_HEIGHT - BOX_HEIGHT - 100
+            
+        self.rect = pygame.Rect(start_x, start_y, BOX_WIDTH, BOX_HEIGHT)
         self.vy = 0.0
         self.dragging = False
         self.offset_x = 0
         self.offset_y = 0
         self.is_grounded = False 
+        self.snow_box = [0] * BOX_WIDTH
 
-    def update(self, mouse_pos, mouse_pressed, particles):
-        if mouse_pressed:
-            if not self.dragging and self.rect.collidepoint(mouse_pos):
-                self.dragging = True
-                self.offset_x = self.rect.x - mouse_pos[0]
-                self.offset_y = self.rect.y - mouse_pos[1]
-                self.vy = 0
-        else:
-            self.dragging = False
+    def get_base_y(self, lx):
+        return self.rect.top
+        
+    def get_bottom_y(self, lx):
+        return self.rect.bottom
 
+    def collidepoint(self, pos):
+        return self.rect.collidepoint(pos)
+
+    def update(self, mouse_pos, particles, all_boxes):
         if self.dragging:
             self.rect.x = mouse_pos[0] + self.offset_x
             self.rect.y = mouse_pos[1] + self.offset_y
@@ -301,54 +457,63 @@ class PhysicsBox:
             self.is_grounded = False 
             for x in range(self.rect.left, self.rect.right):
                 if 0 <= x < SCREEN_WIDTH:
+                    lx_self = x - self.rect.left
+                    bottom_self = self.get_bottom_y(lx_self)
                     snow_top = SCREEN_HEIGHT - particles.snow_ground[x]
-                    if snow_top < self.rect.bottom:
-                        particles.snow_ground[x] = max(0, SCREEN_HEIGHT - self.rect.bottom)
+                    if snow_top < bottom_self:
+                        particles.snow_ground[x] = max(0, int(SCREEN_HEIGHT - bottom_self))
+                    if snow_top < bottom_self:
+                        particles.snow_ground[x] = max(0, int(SCREEN_HEIGHT - bottom_self))
         else:
             self.vy += GRAVITY
             in_snow = False
             for x in range(self.rect.left, self.rect.right):
                 if 0 <= x < SCREEN_WIDTH:
-                    if (SCREEN_HEIGHT - particles.snow_ground[x]) < self.rect.bottom:
+                    lx_self = x - self.rect.left
+                    if (SCREEN_HEIGHT - particles.snow_ground[x]) < self.get_bottom_y(lx_self):
                         in_snow = True
                         break
             if in_snow and self.vy > 1.0:
                 self.vy *= 0.5
 
             self.rect.y += int(self.vy)
-            floor_y = SCREEN_HEIGHT
+            
+            max_pen = -9999
             for x in range(self.rect.left, self.rect.right):
                 if 0 <= x < SCREEN_WIDTH:
-                    snow_top = SCREEN_HEIGHT - particles.snow_ground[x]
-                    if snow_top < floor_y:
-                        floor_y = snow_top
+                    lx_self = x - self.rect.left
+                    bottom_y = self.get_bottom_y(lx_self)
+                    hit_y, hit_box = particles.get_surface_y(x, bottom_y, all_boxes, exclude_box=self)
+                    pen = bottom_y - hit_y
+                    if pen > max_pen:
+                        max_pen = pen
 
-            if self.rect.bottom >= floor_y:
-                self.rect.bottom = floor_y
-                self.vy = 0
-                self.is_grounded = True
-            elif self.rect.bottom >= SCREEN_HEIGHT:
-                self.rect.bottom = SCREEN_HEIGHT
+            if max_pen >= 0:
+                self.rect.y -= int(max_pen)
                 self.vy = 0
                 self.is_grounded = True
             else:
                 self.is_grounded = False
 
-            if self.vy == 0 and self.rect.bottom < SCREEN_HEIGHT:
+            if self.vy == 0 and self.is_grounded:
                 on_snow = False
                 for x in range(self.rect.left, self.rect.right):
-                    if 0 <= x < SCREEN_WIDTH and SCREEN_HEIGHT - particles.snow_ground[x] == self.rect.bottom:
-                        on_snow = True
-                        break
+                    if 0 <= x < SCREEN_WIDTH:
+                        lx_self = x - self.rect.left
+                        hit_y, hit_box = particles.get_surface_y(x, self.get_bottom_y(lx_self), all_boxes, exclude_box=self)
+                        if hit_y == self.get_bottom_y(lx_self):
+                            on_snow = True
+                            break
                 if on_snow:
                     if random.random() < 0.2: 
                         self.rect.y += 1
-                        self.rect.bottom = min(SCREEN_HEIGHT, self.rect.bottom)
             
             for x in range(self.rect.left, self.rect.right):
                 if 0 <= x < SCREEN_WIDTH:
-                    if SCREEN_HEIGHT - particles.snow_ground[x] < self.rect.bottom:
-                        particles.snow_ground[x] = max(0, SCREEN_HEIGHT - self.rect.bottom)
+                    lx_self = x - self.rect.left
+                    bottom_self = self.get_bottom_y(lx_self)
+                    if SCREEN_HEIGHT - particles.snow_ground[x] < bottom_self:
+                        particles.snow_ground[x] = max(0, int(SCREEN_HEIGHT - bottom_self))
 
         if self.rect.left < 0: self.rect.left = 0
         if self.rect.right > SCREEN_WIDTH: self.rect.right = SCREEN_WIDTH
@@ -356,3 +521,44 @@ class PhysicsBox:
     def draw(self, surface):
         pygame.draw.rect(surface, BLACK, self.rect)
         pygame.draw.rect(surface, GRAY, self.rect, 2)
+
+class PhysicsCircle(PhysicsBox):
+    def __init__(self, start_x=None, start_y=None, radius=None):
+        if radius is None:
+            radius = BOX_WIDTH // 2
+        if start_x is None:
+            start_x = SCREEN_WIDTH // 2 - radius
+        if start_y is None:
+            start_y = SCREEN_HEIGHT - radius * 2 - 100
+            
+        self.rect = pygame.Rect(start_x, start_y, radius * 2, radius * 2)
+        self.radius = radius
+        self.vy = 0.0
+        self.dragging = False
+        self.offset_x = 0
+        self.offset_y = 0
+        self.is_grounded = False 
+        self.snow_box = [0] * (radius * 2)
+
+    def get_base_y(self, lx):
+        dx = lx - self.radius
+        h2 = self.radius**2 - dx**2
+        if h2 < 0: h2 = 0
+        h = math.sqrt(h2)
+        return self.rect.centery - h
+
+    def get_bottom_y(self, lx):
+        dx = lx - self.radius
+        h2 = self.radius**2 - dx**2
+        if h2 < 0: h2 = 0
+        h = math.sqrt(h2)
+        return self.rect.centery + h
+
+    def collidepoint(self, pos):
+        dx = pos[0] - self.rect.centerx
+        dy = pos[1] - self.rect.centery
+        return dx*dx + dy*dy <= self.radius**2
+
+    def draw(self, surface):
+        pygame.draw.circle(surface, BLACK, self.rect.center, self.radius)
+        pygame.draw.circle(surface, GRAY, self.rect.center, self.radius, 2)

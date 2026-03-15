@@ -7,7 +7,7 @@ import os
 import math
 import random
 from config import *
-from physics import ParticleSystem, PhysicsBox
+from physics import ParticleSystem, PhysicsBox, PhysicsCircle
 
 if os.name == 'nt':
     try:
@@ -99,7 +99,11 @@ def main():
     
     clock = pygame.time.Clock()
     particles = ParticleSystem()
-    box = PhysicsBox()
+    boxes = [
+        PhysicsBox(SCREEN_WIDTH // 2 - 100), 
+        PhysicsBox(SCREEN_WIDTH // 2 + 50),
+        PhysicsCircle(SCREEN_WIDTH // 2 + 150)
+    ]
 
     scale_mode = "Retro_Scale"
     speed_level = 10 
@@ -146,11 +150,64 @@ def main():
 
         speed_mult = speed_level * 0.064 
 
-        box.update(mouse_pos, mouse_pressed, particles)
-        if box.dragging and box.vy == 0:
-             particles.snow_box = [max(0, h-2) for h in particles.snow_box]
+        if mouse_pressed and not any(b.dragging for b in boxes):
+            for box in reversed(boxes):
+                if box.collidepoint(mouse_pos):
+                    box.dragging = True
+                    box.offset_x = box.rect.x - mouse_pos[0]
+                    box.offset_y = box.rect.y - mouse_pos[1]
+                    box.vy = 0
+                    break
+        elif not mouse_pressed:
+            for box in boxes:
+                box.dragging = False
 
-        particles.update_physics(box, speed_mult)
+        for box in boxes:
+            box.update(mouse_pos, particles, boxes)
+            if box.dragging and box.vy == 0:
+                 box.snow_box = [max(0, h-2) for h in box.snow_box]
+
+        # --- AABB Collision (Kutu Etkileşim) ---
+        for _ in range(3):
+            for i in range(len(boxes)):
+                for j in range(i + 1, len(boxes)):
+                    b1 = boxes[i]
+                    b2 = boxes[j]
+                    if b1.rect.colliderect(b2.rect):
+                        dx = b1.rect.centerx - b2.rect.centerx
+                        dy = b1.rect.centery - b2.rect.centery
+                        overlap_x = (b1.rect.width + b2.rect.width)/2 - abs(dx)
+                        overlap_y = (b1.rect.height + b2.rect.height)/2 - abs(dy)
+                        
+                        if overlap_x > 0 and overlap_y > 0:
+                            if overlap_x < overlap_y:
+                                if b1.dragging and not b2.dragging: 
+                                    b2.rect.x += int(overlap_x) if dx < 0 else -int(overlap_x)
+                                elif b2.dragging and not b1.dragging: 
+                                    b1.rect.x += int(overlap_x) if dx > 0 else -int(overlap_x)
+                                else:
+                                    sign = 1 if dx > 0 else -1
+                                    b1.rect.x += int(overlap_x / 2) * sign
+                                    b2.rect.x -= int(overlap_x / 2) * sign
+                            else:
+                                if b1.dragging and not b2.dragging:
+                                    b2.rect.y += int(overlap_y) if dy < 0 else -int(overlap_y)
+                                    b2.vy = 0
+                                elif b2.dragging and not b1.dragging:
+                                    b1.rect.y += int(overlap_y) if dy > 0 else -int(overlap_y)
+                                    b1.vy = 0
+                                else:
+                                    sign = 1 if dy > 0 else -1
+                                    b1.rect.y += int(overlap_y / 2) * sign
+                                    b2.rect.y -= int(overlap_y / 2) * sign
+                                    b1.vy = 0
+                                    b2.vy = 0
+        
+        for box in boxes:
+            if box.rect.left < 0: box.rect.left = 0
+            if box.rect.right > SCREEN_WIDTH: box.rect.right = SCREEN_WIDTH
+
+        particles.update_physics(boxes, speed_mult)
 
         # =====================================================================
         # YENİ RENDER SIRALAMASI (KATMAN ÇÖZÜMÜ)
@@ -166,13 +223,15 @@ def main():
 
         # 2. ORTA KATMAN: Karlar, Kutu ve Birikintiler (Artık direğin önündeler!)
         particles.draw_particles(screen, scale_mode)
-        particles.draw_snow_accumulation(screen, box, scale_mode)
-        box.draw(screen)
+        particles.draw_grass(screen, scale_mode)
+        particles.draw_snow_accumulation(screen, boxes, scale_mode)
+        for box in boxes:
+            box.draw(screen)
         particles.draw_splashes(screen, scale_mode)
 
         # 3. EN ÜST KATMAN: Işık ve Gece Maskesi (Multiply)
         night_overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        night_overlay.fill(AMBIENT_COLOR) 
+        night_overlay.fill(AMBIENT_COLOR)
 
         if lamp_on:
             # Soldaki lamba için ışık konisi ve bloom
