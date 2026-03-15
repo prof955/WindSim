@@ -24,20 +24,27 @@ class ParticleSystem:
         for x in range(0, SCREEN_WIDTH, 4):
             if random.random() < 0.8:
                 is_flower = random.random() < 0.08
+                is_mutant = random.random() < 0.03
+                
+                target_height = random.uniform(35.0, 50.0) if is_mutant else random.uniform(12.0, 32.0)
+                
                 self.grass_blades.append({
                     'x': x,
-                    't_h': random.uniform(12.0, 32.0),
-                    'c_h': random.uniform(2.0, 8.0),
+                    't_h': target_height,
+                    'c_h': random.uniform(0.1, 1.0),
                     'bend': 0.0,
-                    'flower': is_flower,
-                    'flower_color': random.choice(flower_colors) if is_flower else None,
-                    'phase': random.uniform(0, math.pi * 2)
+                    'flower': is_flower or is_mutant,
+                    'flower_color': random.choice(flower_colors) if (is_flower or is_mutant) else None,
+                    'phase': random.uniform(0, math.pi * 2),
+                    'is_mutant': is_mutant
                 })
         self.mode = "SNOW"
         self.wind_speed = 0.0
         self.frame_counter = 0
         self.is_rapid_melting = False
         self.current_melt_mult = 1.0
+        self.last_update_time = pygame.time.get_ticks()
+        self.time_accumulator = 0
 
     def get_surface_y(self, x, current_y, boxes, exclude_box=None):
         ix = int(x)
@@ -94,13 +101,14 @@ class ParticleSystem:
         max_snow_current = max(self.snow_ground) if self.snow_ground else 0
         current_snow_ratio = max_snow_current / MAX_SNOW_GROUND if MAX_SNOW_GROUND > 0 else 0
 
-        if self.frame_counter % 5 == 0:
-            for grass in self.grass_blades:
-                snow_h = self.snow_ground[grass['x']]
-                if self.mode == "RAIN" and grass['c_h'] < grass['t_h'] and snow_h < grass['c_h']:
-                    grass['c_h'] += 0.2
-                if snow_h > grass['c_h'] + 2:
-                    grass['c_h'] = max(1.0, grass['c_h'] - 0.1)
+        if speed_mult > 0:
+            if self.frame_counter % 5 == 0:
+                for grass in self.grass_blades:
+                    snow_h = self.snow_ground[grass['x']]
+                    if self.mode == "RAIN" and grass['c_h'] < grass['t_h'] and snow_h < grass['c_h']:
+                        grass['c_h'] += 0.2
+                    if snow_h > grass['c_h'] + 2:
+                        grass['c_h'] = max(0.5, grass['c_h'] - 0.1)
 
         if current_snow_ratio >= DYNAMIC_MELT_HIGH and not self.is_rapid_melting:
             self.is_rapid_melting = True
@@ -368,9 +376,14 @@ class ParticleSystem:
                 else:
                     target_surface.set_at((int(x), int(y)), ICE_BLUE)
 
-    def draw_grass(self, surface, scale_mode):
+    def draw_grass(self, surface, scale_mode, speed_mult):
         sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1
         current_time = pygame.time.get_ticks()
+        
+        if speed_mult > 0:
+            dt = current_time - self.last_update_time
+            self.time_accumulator += dt
+        self.last_update_time = current_time
         for grass in self.grass_blades:
             x = grass['x']
             snow_h = self.snow_ground[x]
@@ -378,7 +391,7 @@ class ParticleSystem:
                 continue 
             
             wind_effect = self.wind_speed * 1.5
-            oscillation = math.sin(current_time * 0.003 + grass['phase']) * 2.0
+            oscillation = math.sin(self.time_accumulator * 0.003 + grass['phase']) * 2.0
             
             snow_weight_bend = 0
             if snow_h > 0:
@@ -407,12 +420,19 @@ class ParticleSystem:
                 rx1, ry1 = (int(base_x)//sf)*sf, (int(base_y)//sf)*sf
                 rx2, ry2 = (int(tip_x)//sf)*sf, (int(tip_y)//sf)*sf
                 pygame.draw.line(surface, color, (rx1, ry1), (rx2, ry2), sf)
+                
+                # Çiçek
                 if grass['flower'] and h > 8:
-                    pygame.draw.rect(surface, grass['flower_color'], (rx2 - sf, ry2 - sf, sf*2, sf*2))
+                    size_mult = 3 if grass['is_mutant'] else 2
+                    offset = sf * (size_mult // 2)
+                    pygame.draw.rect(surface, grass['flower_color'], (rx2 - offset, ry2 - offset, sf*size_mult, sf*size_mult))
             else:
-                pygame.draw.line(surface, color, (int(base_x), int(base_y)), (int(tip_x), int(tip_y)), 1)
+                line_w = 2 if grass['is_mutant'] else 1
+                pygame.draw.line(surface, color, (int(base_x), int(base_y)), (int(tip_x), int(tip_y)), line_w)
+                # Çiçek
                 if grass['flower'] and h > 8:
-                    pygame.draw.circle(surface, grass['flower_color'], (int(tip_x), int(tip_y)), 2)
+                    radius = 4 if grass['is_mutant'] else 2
+                    pygame.draw.circle(surface, grass['flower_color'], (int(tip_x), int(tip_y)), radius)
 
     def draw_splashes(self, target_surface, scale_mode):
         sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1

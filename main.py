@@ -146,9 +146,13 @@ def main():
                     if event.key == pygame.K_UP:
                         speed_level = min(10, speed_level + 1)
                     if event.key == pygame.K_DOWN:
-                        speed_level = max(0, speed_level - 1)
+                        speed_level = max(-1, speed_level - 1)
 
-        speed_mult = speed_level * 0.064 
+        speed_mult = max(0, speed_level) * 0.064
+        if speed_level == -1:
+            particles.snow_flakes.clear()
+            particles.rain_drops.clear()
+            particles.splashes.clear() 
 
         if mouse_pressed and not any(b.dragging for b in boxes):
             for box in reversed(boxes):
@@ -223,7 +227,7 @@ def main():
 
         # 2. ORTA KATMAN: Karlar, Kutu ve Birikintiler (Artık direğin önündeler!)
         particles.draw_particles(screen, scale_mode)
-        particles.draw_grass(screen, scale_mode)
+        particles.draw_grass(screen, scale_mode, speed_mult)
         particles.draw_snow_accumulation(screen, boxes, scale_mode)
         for box in boxes:
             box.draw(screen)
