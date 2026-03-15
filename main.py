@@ -118,6 +118,9 @@ def main():
         alpha = int(255 * (1.0 - (r / glow_radius)))
         pygame.draw.circle(glow_surf, (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha), (glow_radius, 0), r)
 
+    # Pre-create night overlay surface for performance
+    night_overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+
     running = True
     while running:
         current_time = pygame.time.get_ticks()
@@ -240,7 +243,6 @@ def main():
         particles.draw_splashes(screen, scale_mode)
 
         # 3. EN ÜST KATMAN: Işık ve Gece Maskesi (Multiply)
-        night_overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         night_overlay.fill(AMBIENT_COLOR)
 
         if lamp_on:
