@@ -16,9 +16,8 @@ if os.name == 'nt':
         pass
 
 def create_true_light_cone():
-    """
-    Yeşil Bölge Çözümü: Çekirdek (Core) ve Sündürülmüş Gradient (Fade) Mantığı
-    """
+    #Yeşil Bölge Çözümü: Çekirdek (Core) ve Sündürülmüş Gradient (Fade) Mantığı
+    
     log_w = LAMP_SPREAD
     log_h = LOGICAL_H
     
