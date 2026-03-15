@@ -25,8 +25,13 @@ class ParticleSystem:
             if random.random() < 0.8:
                 is_flower = random.random() < 0.08
                 is_mutant = random.random() < 0.03
+                # Doğal tepe/dalgalanma hissi veren matematiksel zemin genetiği
+                rolling_h = 10.0 + math.sin(x * 0.05) * 6.0 + math.sin(x * 0.01) * 4.0
+                spike = random.uniform(5.0, 15.0) if random.random() < 0.1 else 0.0
                 
-                target_height = random.uniform(35.0, 50.0) if is_mutant else random.uniform(12.0, 32.0)
+                target_height = random.uniform(35.0, 50.0) if is_mutant else (rolling_h + spike + random.uniform(0.0, 5.0))
+                if not is_mutant and target_height < 5.0: 
+                    target_height = random.uniform(5.0, 10.0)
                 
                 self.grass_blades.append({
                     'x': x,
@@ -38,8 +43,9 @@ class ParticleSystem:
                     'phase': random.uniform(0, math.pi * 2),
                     'is_mutant': is_mutant
                 })
-        self.mode = "SNOW"
+        self.mode = STARTUP_MODE
         self.wind_speed = 0.0
+        self.smooth_wind = 0.0
         self.frame_counter = 0
         self.is_rapid_melting = False
         self.current_melt_mult = 1.0
@@ -383,6 +389,7 @@ class ParticleSystem:
         if speed_mult > 0:
             dt = current_time - self.last_update_time
             self.time_accumulator += dt
+            self.smooth_wind += (self.wind_speed - self.smooth_wind) * 0.01
         self.last_update_time = current_time
         for grass in self.grass_blades:
             x = grass['x']
@@ -390,7 +397,7 @@ class ParticleSystem:
             if snow_h >= grass['c_h'] * 1.5:
                 continue 
             
-            wind_effect = self.wind_speed * 1.5
+            wind_effect = self.smooth_wind * 1.5
             oscillation = math.sin(self.time_accumulator * 0.003 + grass['phase']) * 2.0
             
             snow_weight_bend = 0

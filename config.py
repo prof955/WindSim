@@ -2,6 +2,8 @@
 # config.py - DOĞA VE FİZİK AYARLARI
 # ==========================================
 
+STARTUP_MODE = "RAIN" # "SNOW" veya "RAIN" (Başlangıç modu)
+
 # Ekran ve Ölçek Ayarları
 SCALE_FACTOR = 4
 LOGICAL_W = 320
