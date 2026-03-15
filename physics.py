@@ -52,6 +52,63 @@ class ParticleSystem:
         self.last_update_time = pygame.time.get_ticks()
         self.time_accumulator = 0
 
+    def resize(self, new_w, new_h, old_w, old_h, boxes):
+        # Gerçek mevcut genişliği al (Parametreye güvenme, dizinin boyuna bak)
+        actual_old_w = len(self.snow_ground)
+        if actual_old_w <= 0: return
+
+        import config
+        global SCREEN_WIDTH, SCREEN_HEIGHT, SCALE_FACTOR
+        SCREEN_WIDTH, SCREEN_HEIGHT = new_w, new_h
+        SCALE_FACTOR = config.SCALE_FACTOR
+
+        # 1. Kar birikintilerini orantıla
+        new_snow = [0] * new_w
+        ratio_x = new_w / actual_old_w
+        for i in range(new_w):
+            old_idx = int(i / ratio_x)
+            if old_idx < actual_old_w:
+                new_snow[i] = self.snow_ground[old_idx]
+        self.snow_ground = new_snow
+
+        # 2. Mevcut çimleri GÜNCELLE ve KORU (Resetleme!)
+        updated_grass = []
+        for grass in self.grass_blades:
+            new_x = int(grass['x'] * ratio_x)
+            # Sadece yeni ekranın içinde kalanları tut
+            if 0 <= new_x < new_w:
+                grass['x'] = new_x
+                # grass['c_h'] DEĞİŞTİRME - büyüme durumunu koru
+                updated_grass.append(grass)
+        
+        self.grass_blades = updated_grass
+        
+        # 3. Yeni alanlarda eksik çim varsa doldur
+        existing_xs = {g['x'] for g in self.grass_blades}
+        flower_colors = [(255, 105, 180), (255, 215, 0), (147, 112, 219), (255, 69, 0), (135, 206, 235), (255, 255, 255)]
+        for x in range(0, new_w, 4):
+            if x not in existing_xs:
+                if random.random() < 0.8:
+                    is_flower = random.random() < 0.08
+                    is_mutant = random.random() < 0.03
+                    rolling_h = 10.0 + math.sin(x * 0.05) * 6.0 + math.sin(x * 0.01) * 4.0
+                    spike = random.uniform(5.0, 15.0) if random.random() < 0.1 else 0.0
+                    target_height = random.uniform(35.0, 50.0) if is_mutant else (rolling_h + spike + random.uniform(0.0, 5.0))
+                    self.grass_blades.append({
+                        'x': x, 't_h': target_height, 'c_h': target_height if self.mode == "SNOW" else 1.0,
+                        'bend': 0.0, 'flower': is_flower or is_mutant,
+                        'flower_color': random.choice(flower_colors), 'phase': random.uniform(0, math.pi * 2),
+                        'is_mutant': is_mutant
+                    })
+        self.grass_blades.sort(key=lambda g: g['x'])
+
+        # 4. Kutuları orantıla ve ölçekle
+        ratio_y = new_h / old_h if old_h > 0 else 1
+        for box in boxes:
+            box.rect.x = int(box.rect.x * ratio_x)
+            box.rect.y = int(box.rect.y * ratio_y)
+            box.resize(SCALE_FACTOR)
+
     def get_surface_y(self, x, current_y, boxes, exclude_box=None):
         ix = int(x)
         if ix < 0 or ix >= SCREEN_WIDTH:
@@ -77,7 +134,9 @@ class ParticleSystem:
         buffer = SCREEN_WIDTH // 2
         x = random.uniform(-buffer, SCREEN_WIDTH + buffer)
         y = random.uniform(-100, 0)
-        vy = random.uniform(16.0, 28.0) 
+        # Hızı ekran ölçeğine göre oranla (Baz ölçek 4.0 kabul edildi)
+        speed_scale = SCALE_FACTOR / 4.0
+        vy = random.uniform(16.0, 28.0) * speed_scale
         self.rain_drops.append({'x': x, 'y': y, 'vy': vy})
 
     def add_snow(self):
@@ -91,7 +150,9 @@ class ParticleSystem:
         y = random.uniform(-100, 0)
         phase = random.uniform(0, math.pi * 2)
         amp = random.uniform(0.3, 1.0)
-        vy = random.uniform(2.0, 6.0)
+        # Hızı ekran ölçeğine göre oranla
+        speed_scale = SCALE_FACTOR / 4.0
+        vy = random.uniform(2.0, 6.0) * speed_scale
         self.snow_flakes.append({'x': x, 'y': y, 'vy': vy, 'phase': phase, 'amp': amp})
 
     def add_splash(self, x, y, incoming_vx, incoming_vy):
@@ -105,7 +166,12 @@ class ParticleSystem:
         self.frame_counter += 1
         current_time = pygame.time.get_ticks()
         max_snow_current = max(self.snow_ground) if self.snow_ground else 0
-        current_snow_ratio = max_snow_current / MAX_SNOW_GROUND if MAX_SNOW_GROUND > 0 else 0
+        speed_scale = SCALE_FACTOR / 4.0
+        scaled_gravity = GRAVITY * speed_scale
+        scaled_max_ground = MAX_SNOW_GROUND * speed_scale
+        scaled_max_box = MAX_SNOW_BOX * speed_scale
+        
+        current_snow_ratio = max_snow_current / scaled_max_ground if scaled_max_ground > 0 else 0
 
         if speed_mult > 0:
             if self.frame_counter % 5 == 0:
@@ -139,7 +205,9 @@ class ParticleSystem:
                         box.snow_box[i] -= 1
 
         if self.mode == "RAIN":
-            while len(self.rain_drops) < 800:
+            # Yoğunluğu korumak için drop sayısını genişliğe oranla (Baz: 1280 genişlik için 800 drop)
+            max_drops = int(800 * (SCREEN_WIDTH / 1280.0))
+            while len(self.rain_drops) < max_drops:
                 self.add_rain()
             for drop in self.rain_drops[:]:
                 vx = self.wind_speed * 3.0 * speed_mult
@@ -181,7 +249,9 @@ class ParticleSystem:
 
         elif self.mode == "SNOW":
             snow_speed_mult = speed_mult * 2.0  
-            while len(self.snow_flakes) < 1500: 
+            # Yoğunluğu korumak için flake sayısını genişliğe oranla (Baz: 1280 genişlik için 1500 flake)
+            max_flakes = int(1500 * (SCREEN_WIDTH / 1280.0))
+            while len(self.snow_flakes) < max_flakes: 
                 self.add_snow()
 
             for flake in self.snow_flakes[:]:
@@ -204,14 +274,14 @@ class ParticleSystem:
                     lx = int(next_x) - hit_box.rect.left
                     base_y = hit_box.get_base_y(lx)
                     if flake['y'] <= base_y + vy:
-                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] < MAX_SNOW_BOX:
+                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] < scaled_max_box:
                             hit_box.snow_box[lx] += 1
                     else: 
                         if hit_box.is_grounded:
                             if random.random() < 0.5: 
                                 scatter = int(abs(random.gauss(0, 3 + abs(self.wind_speed))))
                                 side_x = hit_box.rect.left - 1 - scatter if vx > 0 else hit_box.rect.right + scatter
-                                if 0 <= side_x < SCREEN_WIDTH and self.snow_ground[side_x] < MAX_SNOW_GROUND:
+                                if 0 <= side_x < SCREEN_WIDTH and self.snow_ground[side_x] < scaled_max_ground:
                                     self.snow_ground[side_x] += 1
                     self.snow_flakes.remove(flake)
                     continue
@@ -221,10 +291,10 @@ class ParticleSystem:
                     ix = int(next_x)
                     if hit_box:
                         lx = ix - hit_box.rect.left
-                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] < MAX_SNOW_BOX:
+                        if 0 <= lx < len(hit_box.snow_box) and hit_box.snow_box[lx] < scaled_max_box:
                             hit_box.snow_box[lx] += 1
                     else:
-                        if 0 <= ix < SCREEN_WIDTH and self.snow_ground[ix] < MAX_SNOW_GROUND:
+                        if 0 <= ix < SCREEN_WIDTH and self.snow_ground[ix] < scaled_max_ground:
                             self.snow_ground[ix] += 1
                     self.snow_flakes.remove(flake)
                 else:
@@ -270,7 +340,7 @@ class ParticleSystem:
                                     self.snow_ground[scatter_x] += 1
 
         for splash in self.splashes[:]:
-            splash['vy'] += GRAVITY 
+            splash['vy'] += scaled_gravity 
             splash['x'] += splash['vx'] 
             splash['y'] += splash['vy'] 
             splash['life'] -= 1 
@@ -337,29 +407,43 @@ class ParticleSystem:
                     pygame.draw.line(surface, WHITE, (x, SCREEN_HEIGHT - h), (x, SCREEN_HEIGHT))
                     
         for box in boxes:
+            # Kutunun/Dairenin tipine göre çizim stratejisi
+            is_circle = isinstance(box, PhysicsCircle)
+            
             for x in range(0, box.rect.width, sf):
                 chunk = box.snow_box[x:x+sf]
                 h = max(chunk) if chunk else 0
                 if h > 0:
                     world_x = box.rect.left + x
-                    base_y = box.get_base_y(x)
                     
-                    # Snow height shouldn't go through the bottom of another box
-                    max_snow_top = base_y - h
-                    for other in boxes:
-                        if other is not box:
-                            if other.rect.left <= world_x < other.rect.right:
-                                lx_other = world_x - other.rect.left
-                                bottom_other = other.get_bottom_y(lx_other)
-                                if bottom_other < base_y and bottom_other > max_snow_top:
-                                    max_snow_top = bottom_other
-                                    
-                    draw_height = base_y - max_snow_top
-                    if draw_height > 0:
+                    if is_circle:
+                        # Daire için kavis takibi: Bloğun her pikseli için ayrı base_y hesapla
+                        # Retro modda bile tabanı kavisli çizerek yüzeye oturtuyoruz.
+                        for sub_x in range(sf):
+                            curr_x = x + sub_x
+                            if curr_x >= box.rect.width: break
+                            
+                            pixel_x = world_x + sub_x
+                            base_y = box.get_base_y(curr_x)
+                            
+                            # Kavisli tabanı takip eden kar sütunu
+                            snow_top = base_y - h
+                            # Diğer kutuların altına girmesini engelle (Opsiyonel derinlik kontrolü)
+                            draw_h = h
+                            if scale_mode == "Retro_Scale":
+                                pygame.draw.rect(surface, WHITE, (pixel_x, int(snow_top), 1, int(draw_h) + 1))
+                            else:
+                                pygame.draw.line(surface, WHITE, (pixel_x, int(snow_top)), (pixel_x, int(base_y)))
+                    else:
+                        # Normal kutu çizimi (Düz taban)
+                        sample_lx = x + (sf // 2) if sf > 1 else x
+                        sample_lx = min(sample_lx, box.rect.width - 1)
+                        base_y = box.get_base_y(sample_lx)
+                        snow_top = base_y - h
                         if scale_mode == "Retro_Scale":
-                            pygame.draw.rect(surface, WHITE, (world_x, max_snow_top, sf, draw_height))
+                            pygame.draw.rect(surface, WHITE, (world_x, int(snow_top), sf, h))
                         else:
-                            pygame.draw.line(surface, WHITE, (world_x, max_snow_top), (world_x, int(base_y)))
+                            pygame.draw.line(surface, WHITE, (world_x, int(snow_top)), (world_x, int(base_y)))
 
     def draw_particles(self, target_surface, scale_mode):
         sf = SCALE_FACTOR if scale_mode == "Retro_Scale" else 1
@@ -467,6 +551,24 @@ class PhysicsBox:
         self.is_grounded = False 
         self.snow_box = [0] * BOX_WIDTH
 
+    def resize(self, new_scale):
+        # Kutu boyutlarını yeni scale değerine göre güncelle (30 mantıksal genişlik)
+        old_w = self.rect.width
+        new_w = 30 * new_scale
+        new_h = 30 * new_scale
+        
+        self.rect.width = new_w
+        self.rect.height = new_h
+        
+        # Kar birikintisini yeni genişliğe uyarla
+        new_snow_box = [0] * new_w
+        if old_w > 0:
+            for i in range(new_w):
+                old_idx = int(i * (old_w / new_w))
+                if old_idx < len(self.snow_box):
+                    new_snow_box[i] = self.snow_box[old_idx]
+        self.snow_box = new_snow_box
+
     def get_base_y(self, lx):
         return self.rect.top
         
@@ -566,6 +668,22 @@ class PhysicsCircle(PhysicsBox):
         self.offset_y = 0
         self.is_grounded = False 
         self.snow_box = [0] * (radius * 2)
+
+    def resize(self, new_scale):
+        # Daire boyutlarını güncelle (30 mantıksal çap)
+        old_w = self.rect.width
+        new_diam = 30 * new_scale
+        self.radius = new_diam // 2
+        self.rect.width = new_diam
+        self.rect.height = new_diam
+        
+        new_snow_box = [0] * new_diam
+        if old_w > 0:
+            for i in range(new_diam):
+                old_idx = int(i * (old_w / new_diam))
+                if old_idx < len(self.snow_box):
+                    new_snow_box[i] = self.snow_box[old_idx]
+        self.snow_box = new_snow_box
 
     def get_base_y(self, lx):
         dx = lx - self.radius

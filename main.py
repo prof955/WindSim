@@ -92,8 +92,9 @@ def draw_retro_lamp(surface, center_x, bottom_of_glass_y, scale):
 
 
 def main():
+    global SCREEN_WIDTH, SCREEN_HEIGHT, SCALE_FACTOR
     pygame.init()
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("WindSim PC v3.2 - Layer Fixed & Gradient Stretched")
     
     clock = pygame.time.Clock()
@@ -112,11 +113,22 @@ def main():
     light_cone_texture = create_true_light_cone()
     
     # Pre-render glow (downward semi-circle)
-    glow_radius = 12 * SCALE_FACTOR
+    # Pre-render glow (downward semi-circle) - OPTIMIZED SIZE & SOFTNESS
+    glow_radius = 20 * SCALE_FACTOR
     glow_surf = pygame.Surface((glow_radius * 2, glow_radius), pygame.SRCALPHA)
-    for r in range(glow_radius, 0, -1):
-        alpha = int(255 * (1.0 - (r / glow_radius)))
-        pygame.draw.circle(glow_surf, (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha), (glow_radius, 0), r)
+    for y in range(glow_radius):
+        for x in range(glow_radius * 2):
+            dx = x - glow_radius
+            dy = y
+            dist = math.sqrt(dx*dx + dy*dy)
+            if dist < glow_radius:
+                ratio = dist / glow_radius
+                # Power 3.0: Kenarlar Power 2.0'dan çok daha yumuşak solacak
+                alpha_factor = math.pow(max(0.0, 1.0 - ratio), 3.0)
+                alpha = int(alpha_factor * 255 * LAMP_INTENSITY * 0.4)
+                alpha = max(0, min(255, alpha))
+                if alpha > 0:
+                    glow_surf.set_at((x, y), (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha))
 
     # Pre-create night overlay surface for performance
     night_overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -156,6 +168,48 @@ def main():
                         speed_level = min(10, speed_level + 1)
                     if event.key == pygame.K_DOWN:
                         speed_level = max(-1, speed_level - 1)
+            elif event.type == pygame.VIDEORESIZE:
+                old_w, old_h = screen.get_size()
+                new_w, new_h = event.w, event.h
+                
+                # Global (module-level) değişkenleri hemen güncelle
+                SCREEN_WIDTH, SCREEN_HEIGHT = new_w, new_h
+                
+                # Config modülünü de güncelle (diğer dosyalar oradan okuyor)
+                import config
+                config.SCREEN_WIDTH = new_w
+                config.SCREEN_HEIGHT = new_h
+                config.SCALE_FACTOR = max(1, new_h // 180)
+                SCALE_FACTOR = config.SCALE_FACTOR
+                
+                import physics
+                physics.SCREEN_WIDTH = new_w
+                physics.SCREEN_HEIGHT = new_h
+                physics.SCALE_FACTOR = config.SCALE_FACTOR
+                
+                screen = pygame.display.set_mode((new_w, new_h), pygame.RESIZABLE)
+                
+                # Fizik dünyasını ve nesneleri uyar
+                particles.resize(new_w, new_h, old_w, old_h, boxes)
+                
+                # Işıkları yeni boyutlara göre baştan render et
+                light_cone_texture = create_true_light_cone()
+                glow_radius = 20 * SCALE_FACTOR
+                glow_surf = pygame.Surface((glow_radius * 2, glow_radius), pygame.SRCALPHA)
+                for y in range(glow_radius):
+                    for x in range(glow_radius * 2):
+                        dx = x - glow_radius
+                        dy = y
+                        dist = math.sqrt(dx*dx + dy*dy)
+                        if dist < glow_radius:
+                            ratio = dist / glow_radius
+                            alpha_f = math.pow(max(0.0, 1.0 - ratio), 3.0)
+                            alpha = int(alpha_f * 255 * LAMP_INTENSITY * 0.4)
+                            alpha = max(0, min(255, alpha))
+                            if alpha > 0:
+                                glow_surf.set_at((x, y), (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha))
+                
+                night_overlay = pygame.Surface((new_w, new_h))
 
         speed_mult = max(0, speed_level) * 0.064
         if speed_level == -1:
@@ -225,6 +279,9 @@ def main():
         # =====================================================================
         # YENİ RENDER SIRALAMASI (KATMAN ÇÖZÜMÜ)
         # =====================================================================
+        # 218: lamp_x = (LAMP_TOP_X / 320) * SCREEN_WIDTH 
+        # 219: lamp_y = (LAMP_TOP_Y / 180) * SCREEN_HEIGHT
+        # Yerine daha kontrollü bir ölçekleme:
         lamp_x = LAMP_TOP_X * SCALE_FACTOR
         lamp_y = LAMP_TOP_Y * SCALE_FACTOR
 
@@ -251,13 +308,13 @@ def main():
             night_overlay.blit(light_cone_texture, light_rect)
 
             glow_y = lamp_y - (4 * SCALE_FACTOR) + 8 # Camin ustu DEĞİL, ortası gibi.
-            night_overlay.blit(glow_surf, (lamp_x - glow_radius, glow_y), special_flags=pygame.BLEND_RGBA_ADD)
+            night_overlay.blit(glow_surf, (lamp_x - glow_radius, glow_y))
 
             # Sağdaki lamba için ışık konisi ve bloom
             lamp_x_right = SCREEN_WIDTH - lamp_x
             light_rect_right = light_cone_texture.get_rect(midtop=(lamp_x_right, lamp_y))
             night_overlay.blit(light_cone_texture, light_rect_right)
-            night_overlay.blit(glow_surf, (lamp_x_right - glow_radius, glow_y), special_flags=pygame.BLEND_RGBA_ADD)
+            night_overlay.blit(glow_surf, (lamp_x_right - glow_radius, glow_y))
 
         screen.blit(night_overlay, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
 
@@ -283,7 +340,9 @@ def main():
             ]
             
             for i, text in enumerate(texts):
-                screen.blit(font.render(text, True, ui_color), (15, 15 + (i * 25)))
+                txt_surf = font.render(text, True, ui_color)
+                txt_rect = txt_surf.get_rect(center=(SCREEN_WIDTH // 2, 30 + (i * 25)))
+                screen.blit(txt_surf, txt_rect)
 
         pygame.display.flip()
         clock.tick(60)
