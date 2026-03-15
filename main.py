@@ -221,7 +221,7 @@ def main():
         # 1. EN ARKA: Lamba Direği ve Armatürü
         draw_retro_lamp(screen, lamp_x, lamp_y, SCALE_FACTOR)
         # Ekranın sağında simetrik bir sokak lambası
-        lamp_x_right = SCREEN_WIDTH - lamp_x - 50
+        lamp_x_right = SCREEN_WIDTH - lamp_x
         draw_retro_lamp(screen, lamp_x_right, lamp_y, SCALE_FACTOR)
 
         # 2. ORTA KATMAN: Karlar, Kutu ve Birikintiler (Artık direğin önündeler!)
@@ -244,46 +244,28 @@ def main():
             glass_h = 4 * SCALE_FACTOR
             center_y = lamp_y - (glass_h // 2)
             glow_radius = 12 * SCALE_FACTOR
-
-            glow_surf = pygame.Surface((glow_radius * 2, glow_radius), pygame.SRCALPHA)
+            glow_surf = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
             for r in range(glow_radius, 0, -1):
                 alpha = int(255 * (1.0 - (r / glow_radius)))
-                pygame.draw.circle(
-                    glow_surf,
-                    (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha),
-                    (glow_radius, 0),
-                    r
-                )
-
-            night_overlay.blit(glow_surf, (lamp_x - glow_radius, center_y), special_flags=pygame.BLEND_RGBA_ADD)
+                pygame.draw.circle(glow_surf, (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha), (glow_radius, glow_radius), r)
+            night_overlay.blit(glow_surf, (lamp_x - glow_radius, center_y - glow_radius), special_flags=pygame.BLEND_RGBA_ADD)
 
             # Sağdaki lamba için ışık konisi ve bloom
-            lamp_x_right = SCREEN_WIDTH - lamp_x - 50
+            lamp_x_right = SCREEN_WIDTH - lamp_x
             light_rect_right = light_cone_texture.get_rect(midtop=(lamp_x_right, lamp_y))
             night_overlay.blit(light_cone_texture, light_rect_right)
 
             center_y_right = lamp_y - (glass_h // 2)
-            glow_surf_right = pygame.Surface((glow_radius * 2, glow_radius), pygame.SRCALPHA)
+            glow_surf_right = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
             for r in range(glow_radius, 0, -1):
-                #alpha = int(255 * (1.0 - (r / glow_radius)))
-                alpha = int(255 * (1.0 - (r / glow_radius)) ** 2)
-                pygame.draw.circle(
-                    glow_surf_right,
-                    (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha),
-                    (glow_radius, 0),
-                    r
-                )
-
-            night_overlay.blit(
-                glow_surf_right,
-                (lamp_x_right - glow_radius, center_y_right),
-                special_flags=pygame.BLEND_RGBA_ADD
-            )
+                alpha = int(255 * (1.0 - (r / glow_radius)))
+                pygame.draw.circle(glow_surf_right, (LAMP_COLOR[0], LAMP_COLOR[1], LAMP_COLOR[2], alpha), (glow_radius, glow_radius), r)
+            night_overlay.blit(glow_surf_right, (lamp_x_right - glow_radius, center_y_right - glow_radius), special_flags=pygame.BLEND_RGBA_ADD)
 
         screen.blit(night_overlay, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
 
         # 4. UI
-        if current_time - last_input_time < 10000: 
+        if current_time - last_input_time < 1000: 
             font = pygame.font.SysFont("Courier New", 18, bold=True)
             ui_color = (150, 255, 150)
             
