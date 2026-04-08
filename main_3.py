@@ -76,58 +76,65 @@ from physics import ParticleSystem, PhysicsBox
 # =====================================================================
 
 def create_perfect_volumetric_cone():
-    # Global değişkenlerinizi çektiğinizi varsayıyorum
-    global LAMP_COLOR, LAMP_INTENSITY, LAMP_SPREAD, SCALE_FACTOR, SCREEN_HEIGHT
-    
-    SAMPLING_W, SAMPLING_H = 400, 300 # Daha hassas ve uzun bir alan
+    """
+    Matematiksel olarak kusursuz, duvar etkisi yaratmayan ve 
+    ışık gücünü koruyan volumetrik piksel motoru.
+    """
+    SAMPLING_W, SAMPLING_H = 400, 200
     surf = pygame.Surface((SAMPLING_W, SAMPLING_H))
-    surf.fill((0, 0, 0))
+    surf.fill((0, 0, 0)) # Additive blend için siyah arka plan.
     
     center_x = SAMPLING_W / 2.0
     
-    # Koninin alt genişliği. Yüzeyin %98'ini kaplasın ki geniş bir ışık olsun ama duvar yapmasın.
-    MAX_RADIUS = (SAMPLING_W / 2.0) * 0.98
-    
+    # Koni en altta yüzeyin sınırlarına DEĞMEDEN bitsin ki duvar etkisi olmasın (%95'ini kullanıyoruz)
+    MAX_RADIUS = (SAMPLING_W / 2.0) * 0.95 
+
     for y in range(SAMPLING_H):
         y_ratio = y / float(SAMPLING_H)
         
-        # y=0'da (ampul) dar başlar, aşağı doğru açılır
-        r = max(2.0, y_ratio * MAX_RADIUS)
+        # Yarıçap artık en altta MAX_RADIUS (yaklaşık 190 px) olacak. Yüzey dışına taşmaz.
+        r = max(3.0, y_ratio * MAX_RADIUS)
         
-        # Dikey sönümlenme: En aşağı indiğinde bile gücünün %30'unu korusun (kaybolmasın)
-        v_fade = 1.0 - (y_ratio * 0.7)
+        # Dikey sönümlenmeyi hafiflettik. Işık yere değdiğinde tamamen siyah olmasın, %40 gücünü korusun.
+        v_fade = 1.0 - (y_ratio * 0.6) 
         
         for x in range(SAMPLING_W):
             dx = abs(x - center_x)
-            
             if dx <= r:
                 horizontal_ratio = dx / r
                 
-                # S-EĞRİSİ (COSINE INTERPOLATION): Işığın ortasını çok parlak, kenarlarını duman gibi yapar
-                h_fade = (math.cos(horizontal_ratio * math.pi) + 1.0) / 2.0
+                # Yatay sönümlenme: 3.0 çok simsiyahtı, 2.0 (Karesel) daha pürüzsüz bir duman/sis etkisi verir
+                h_fade = math.pow(1.0 - horizontal_ratio, 2.0) 
                 
-                # Işığı çok daha "kalın ve dolgun" yapmak için yoğunluğu artırıyoruz
-                brightness = h_fade * v_fade * (LAMP_INTENSITY * 1.5)
+                # Işık kaynağı halesi (Lamba ampulü parlaması)
+                halo_dist = math.sqrt(dx**2 + y**2)
+                halo_fade = 0
+                if halo_dist <= 15:
+                    halo_fade = math.pow(1.0 - (halo_dist / 15.0), 1.5) * 1.5 # Haloyu biraz daha parlak yaptık
                 
-                # Ampul parlaması (Halo)
-                halo_dist = math.sqrt(dx**2 + (y**2)) 
-                if halo_dist <= 25:
-                    halo_fade = 1.0 - (halo_dist / 25.0)
-                    brightness += halo_fade * LAMP_INTENSITY * 2.0
-                    
-                brightness = min(1.0, brightness) # Rengin 1.0'ı (255'i) geçmesini engelle
+                # Parlaklığı hesapla. h_fade ve v_fade'i çarpmak yerine, ışığın hacmini korumak için 
+                # formülü biraz açtık. (Base intensity ile)
+                brightness = min(1.0, (h_fade * v_fade) + halo_fade) * LAMP_INTENSITY
                 
-                if brightness > 0.02:
+                if brightness > 0.01: # Gereksiz sıfıra yakın pikselleri atla (optimizasyon)
                     c_r = min(255, int(LAMP_COLOR[0] * brightness))
                     c_g = min(255, int(LAMP_COLOR[1] * brightness))
                     c_b = min(255, int(LAMP_COLOR[2] * brightness))
                     
                     surf.set_at((x, y), (c_r, c_g, c_b))
-                    
+                
     cone_w = LAMP_SPREAD * SCALE_FACTOR
-    cone_h = SCREEN_HEIGHT * 1.2
+    cone_h = SCREEN_HEIGHT * 1.2 
     
-    # Pürüzsüzce büyüt
+    smooth_cone = pygame.transform.smoothscale(surf, (int(cone_w), int(cone_h)))
+    
+    return smooth_cone, cone_w, cone_h
+                
+    # Bu kusursuz 200x200 dokuyu, ekrandaki gerçek lamba ebatlarına pürüzsüzce sündür
+    cone_w = LAMP_SPREAD * SCALE_FACTOR
+    cone_h = SCREEN_HEIGHT * 1.0 # Ekranın altına kadar uzansın
+    
+    # smoothscale kullanarak pikselleri mükemmel bir şekilde birbirine yedir
     smooth_cone = pygame.transform.smoothscale(surf, (int(cone_w), int(cone_h)))
     
     return smooth_cone, cone_w, cone_h
